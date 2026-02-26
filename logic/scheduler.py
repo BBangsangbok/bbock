@@ -3,7 +3,8 @@ import numpy as np
 
 DAYS = ["월", "화", "수", "목", "금", "토", "일"]
 
-def get_valid_daily_teams(members, day_idx, off_days_dict, allowed_sizes):
+# ✨ 1. 파라미터에 no_dishwasher_days 추가
+def get_valid_daily_teams(members, day_idx, off_days_dict, allowed_sizes, no_dishwasher_days):
     available_members = [m for m in members if day_idx not in off_days_dict.get(m.name, [])]
     
     valid_teams = []
@@ -14,6 +15,13 @@ def get_valid_daily_teams(members, day_idx, off_days_dict, allowed_sizes):
         for team in itertools.combinations(available_members, req_count):
             main_capable_count = sum(1 for m in team if m.can_do("메인"))
             ordering_capable_count = sum(1 for m in team if m.can_do("발주"))
+            
+            # ✨ 2. 설거지 이모 부재일 역량 검증 로직 추가
+            if day_idx in no_dishwasher_days:
+                dishwash_capable_count = sum(1 for m in team if m.can_dishwash)
+                # 설거지 가능한 멤버가 1명도 없다면 이 조합은 탈락!
+                if dishwash_capable_count == 0:
+                    continue 
             
             if main_capable_count >= 2 and ordering_capable_count >= 1:
                 valid_teams.append(team)
@@ -47,11 +55,13 @@ def generate_best_schedules(members, off_days_dict, no_dishwasher_days, public_h
     daily_candidates = []
     for i in range(7):
         allowed_sizes = range(base_reqs[i], max_reqs[i] + 1)
-        teams = get_valid_daily_teams(members, i, off_days_dict, allowed_sizes)
+        # ✨ 3. 함수 호출 시 no_dishwasher_days를 전달하도록 수정
+        teams = get_valid_daily_teams(members, i, off_days_dict, allowed_sizes, no_dishwasher_days)
         if not teams:
-            return False, f"⚠️ 지정된 휴일 또는 조건 때문에 **{DAYS[i]}요일**의 일정 산출이 불가합니다.", []
+            return False, f"⚠️ 지정된 휴일 또는 조건(설거지 역량 부족 등) 때문에 **{DAYS[i]}요일**의 일정 산출이 불가합니다.", []
         daily_candidates.append(teams)
 
+    # ... (이하 백트래킹 및 분산 정렬 코드는 기존과 동일하게 유지합니다) ...
     valid_week_schedules = []
     
     def solve(day_idx, current_counts, current_schedule):
@@ -88,40 +98,32 @@ def generate_best_schedules(members, off_days_dict, no_dishwasher_days, public_h
     solve(0, initial_counts, [])
 
     if not valid_week_schedules:
-        return False, "⚠️ 조건을 동시에 만족하는 스케줄이 없습니다. 특정 요일에 휴일자가 몰렸을 수 있습니다.", []
+        return False, "⚠️ 조건을 동시에 만족하는 스케줄이 없습니다. 특정 요일에 휴일자나 특정 역량 부족자가 몰렸을 수 있습니다.", []
 
-    # ✨ 6. 분산 최소화 정렬 (수정됨: 일별 '평균' 역량 점수 사용)
     unique_schedules = {}
-    red_days = set([5, 6] + public_holidays) # 토, 일, 그리고 공휴일 인덱스 모음
+    red_days = set([5, 6] + public_holidays)
 
     for week_schedule in valid_week_schedules:
         red_day_work_counts = {m.name: 0 for m in members}
-        daily_avg_scores = [] # 일별 평균 점수를 담을 리스트
+        daily_avg_scores = [] 
         
         for day_idx, day_team in enumerate(week_schedule):
-            # 1. 일별 팀 평균 점수 계산 (해당 요일 총점 / 인원수)
             day_total_score = sum(member.score for member in day_team)
             day_avg_score = day_total_score / len(day_team)
             daily_avg_scores.append(day_avg_score)
             
-            # 2. 빨간날 근무 횟수 카운트
             if day_idx in red_days:
                 for member in day_team:
                     red_day_work_counts[member.name] += 1
                 
-        # 🎯 팀 역량(일별 평균 점수)의 분산 계산
         team_strength_variance = np.var(daily_avg_scores)
-        
-        # 🎯 빨간날 근무 횟수의 분산 계산
         red_day_array = list(red_day_work_counts.values())
         red_day_variance = np.var(red_day_array)
         
         schedule_key = tuple(tuple(sorted([m.name for m in team])) for team in week_schedule)
         if schedule_key not in unique_schedules:
-            # (빨간날 근무 분산, 팀 역량 분산, 스케줄) 형태로 저장
             unique_schedules[schedule_key] = (red_day_variance, team_strength_variance, week_schedule)
             
-    # ✨ 1순위: 빨간날 근무 공평하게 / 2순위: 일별 팀 역량 평준화 (둘 다 오름차순 정렬)
     sorted_schedules = sorted(unique_schedules.values(), key=lambda x: (x[0], x[1]))
     top_schedules = [sched for r_var, s_var, sched in sorted_schedules[:top_n]]
     
