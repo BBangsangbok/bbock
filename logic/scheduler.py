@@ -20,9 +20,8 @@ def get_valid_daily_teams(members, day_idx, off_days_dict, allowed_sizes):
                 valid_teams.append(team)
                 
     return valid_teams
-
-def generate_best_schedules(members, off_days_dict, no_dishwasher_days, top_n=5):
-    """멤버별 목표 횟수를 기반으로, 자리가 남으면 인원을 추가 투입하여 일정을 산출합니다."""
+def generate_best_schedules(members, off_days_dict, no_dishwasher_days, public_holidays, top_n=5):
+    """멤버별 목표 횟수를 기반으로, 공휴일을 반영하여 일정을 산출합니다."""
     
     # 1. 멤버들의 총 목표 근무 횟수(공급) 계산
     target_shifts = {}
@@ -31,11 +30,13 @@ def generate_best_schedules(members, off_days_dict, no_dishwasher_days, top_n=5)
         target_shifts[m.name] = 4 if off_count >= 3 else 5
     total_supply = sum(target_shifts.values())
 
-    # 2. 요일별 기본 필요 인원수(수요) 세팅
+    # 2. 요일별 기본 필요 인원수(수요) 세팅 (✨ 공휴일 로직 추가됨)
     base_reqs = []
     for i in range(7):
-        is_weekend = i >= 5
-        req = 4 if is_weekend else 3
+        # 주말(5, 6)이거나 지정된 공휴일(public_holidays)이면 4명, 아니면 3명
+        is_weekend_or_holiday = (i >= 5) or (i in public_holidays)
+        req = 4 if is_weekend_or_holiday else 3
+        
         if i in no_dishwasher_days:
             req += 1
         base_reqs.append(req)
@@ -43,18 +44,15 @@ def generate_best_schedules(members, off_days_dict, no_dishwasher_days, top_n=5)
 
     # 3. 공급과 수요 비교 및 추가 인원 계산
     if total_supply < total_base_demand:
-        return False, f"⚠️ **인력 부족**: 최소 필요 근무 자리({total_base_demand}자리)보다 멤버들의 총 투입 가능 횟수({total_supply}회)가 적어 산출이 불가능합니다. 휴일을 줄여주세요.", []
+        return False, f"⚠️ **인력 부족**: 최소 필요 근무 자리({total_base_demand}자리)보다 멤버들의 총 투입 가능 횟수({total_supply}회)가 적어 산출이 불가능합니다. 휴일을 줄이거나 공휴일 지정을 확인하세요.", []
 
     extra_shifts = total_supply - total_base_demand
-    
-    # 남는 자리를 7일에 골고루 분배하기 위해 하루 최대 추가 가능 인원 계산 (기본 +1명)
     max_daily_extra = (extra_shifts + 6) // 7 if extra_shifts > 0 else 0
     max_reqs = [req + max_daily_extra for req in base_reqs]
 
     # 4. 요일별로 유동적인 사이즈의 조합 생성
     daily_candidates = []
     for i in range(7):
-        # 기본 인원 ~ 최대 추가 인원까지의 범위를 허용
         allowed_sizes = range(base_reqs[i], max_reqs[i] + 1)
         teams = get_valid_daily_teams(members, i, off_days_dict, allowed_sizes)
         if not teams:
@@ -68,17 +66,14 @@ def generate_best_schedules(members, off_days_dict, no_dishwasher_days, top_n=5)
         if len(valid_week_schedules) >= 1000:
             return
             
-        # 가지치기 1: 본인 목표 초과
         if any(current_counts[m.name] > target_shifts[m.name] for m in members):
             return
             
-        # 가지치기 2: 남은 요일 매일 투입해도 목표 미달
         remaining_days = 7 - day_idx
         for m in members:
             if current_counts[m.name] + remaining_days < target_shifts[m.name]:
                 return
 
-        # 가지치기 3: 전체 남은 자리가 넘치거나 모자랄 때 조기 차단 (성능 극대화)
         current_total = sum(current_counts.values())
         min_future = sum(base_reqs[day_idx:])
         max_future = sum(max_reqs[day_idx:])
@@ -121,9 +116,8 @@ def generate_best_schedules(members, off_days_dict, no_dishwasher_days, top_n=5)
     sorted_schedules = sorted(unique_schedules.values(), key=lambda x: x[0])
     top_schedules = [sched for variance, sched in sorted_schedules[:top_n]]
     
-    # 추가 배치 여부 안내 메시지 작성
     msg = "성공"
     if extra_shifts > 0:
-        msg = f"근무 가능 인력이 기본 필요 인원보다 많아, 남는 **{extra_shifts}명**의 자리가 일부 요일에 1명씩 유동적으로 추가 배치되었습니다."
+        msg = f"근무 가능 인력이 필요 인원보다 많아, 남는 **{extra_shifts}명**의 자리가 일부 요일에 1명씩 유동적으로 추가 배치되었습니다."
     
     return True, msg, top_schedules

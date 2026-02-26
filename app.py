@@ -111,8 +111,22 @@ with tab2:
                 off_days_dict[member.name] = selected_days
                 
         with col_right:
-            st.subheader("설거지 이모 부재일 지정")
-            st.write("체크된 요일은 주방 멤버가 1명 더 투입됩니다.")
+            st.subheader("특별 일정 지정")
+            
+            # ✨ 새로 추가된 공휴일 기능
+            st.write("이번 주 평일 중 공휴일이 있나요?")
+            st.caption("공휴일은 주말과 동일하게 기본 4명이 투입됩니다.")
+            public_holidays = st.multiselect(
+                "공휴일 선택 (평일)", 
+                options=range(5), # 0(월) ~ 4(금)까지만 선택 가능하게 제한
+                format_func=lambda x: f"{DAYS[x]}요일",
+                placeholder="없음"
+            )
+            
+            st.write("") # 약간의 여백
+            
+            st.write("설거지 이모 부재일 지정")
+            st.caption("체크된 요일은 주방 멤버가 1명 더 투입됩니다.")
             no_dishwasher_days = st.multiselect(
                 "설거지 이모가 못 오시는 날", 
                 options=range(7), 
@@ -124,10 +138,12 @@ with tab2:
         
         if st.button("🚀 일정 추천 5개 산출하기", type="primary", use_container_width=True):
             with st.spinner('멤버별 목표 근무 횟수를 맞춘 최적의 일정을 탐색 중입니다...'):
+                # ✨ public_holidays 파라미터가 추가되었습니다!
                 success, message, schedules = generate_best_schedules(
                     st.session_state.members, 
                     off_days_dict, 
                     no_dishwasher_days,
+                    public_holidays, 
                     top_n=5
                 )
                 
