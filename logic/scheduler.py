@@ -90,34 +90,38 @@ def generate_best_schedules(members, off_days_dict, no_dishwasher_days, public_h
     if not valid_week_schedules:
         return False, "⚠️ 조건을 동시에 만족하는 스케줄이 없습니다. 특정 요일에 휴일자가 몰렸을 수 있습니다.", []
 
-    # ✨ 6. 분산 최소화 정렬 (주말/공휴일 휴무 분산 최우선 고려)
+    # ✨ 6. 분산 최소화 정렬 (수정됨: 일별 '평균' 역량 점수 사용)
     unique_schedules = {}
     red_days = set([5, 6] + public_holidays) # 토, 일, 그리고 공휴일 인덱스 모음
 
     for week_schedule in valid_week_schedules:
-        member_scores = {m.name: 0 for m in members}
-        red_day_work_counts = {m.name: 0 for m in members} # 빨간날 근무 횟수 기록
+        red_day_work_counts = {m.name: 0 for m in members}
+        daily_avg_scores = [] # 일별 평균 점수를 담을 리스트
         
         for day_idx, day_team in enumerate(week_schedule):
-            for member in day_team:
-                member_scores[member.name] += member.score
-                if day_idx in red_days:
+            # 1. 일별 팀 평균 점수 계산 (해당 요일 총점 / 인원수)
+            day_total_score = sum(member.score for member in day_team)
+            day_avg_score = day_total_score / len(day_team)
+            daily_avg_scores.append(day_avg_score)
+            
+            # 2. 빨간날 근무 횟수 카운트
+            if day_idx in red_days:
+                for member in day_team:
                     red_day_work_counts[member.name] += 1
                 
-        # 역량 점수 분산
-        scores_array = list(member_scores.values())
-        score_variance = np.var(scores_array)
+        # 🎯 팀 역량(일별 평균 점수)의 분산 계산
+        team_strength_variance = np.var(daily_avg_scores)
         
-        # 빨간날 근무 횟수 분산
+        # 🎯 빨간날 근무 횟수의 분산 계산
         red_day_array = list(red_day_work_counts.values())
         red_day_variance = np.var(red_day_array)
         
         schedule_key = tuple(tuple(sorted([m.name for m in team])) for team in week_schedule)
         if schedule_key not in unique_schedules:
-            # (빨간날 분산, 점수 분산, 스케줄) 형태로 저장
-            unique_schedules[schedule_key] = (red_day_variance, score_variance, week_schedule)
+            # (빨간날 근무 분산, 팀 역량 분산, 스케줄) 형태로 저장
+            unique_schedules[schedule_key] = (red_day_variance, team_strength_variance, week_schedule)
             
-    # ✨ 1순위: 빨간날 근무 분산(오름차순) / 2순위: 역량 점수 분산(오름차순)으로 정렬
+    # ✨ 1순위: 빨간날 근무 공평하게 / 2순위: 일별 팀 역량 평준화 (둘 다 오름차순 정렬)
     sorted_schedules = sorted(unique_schedules.values(), key=lambda x: (x[0], x[1]))
     top_schedules = [sched for r_var, s_var, sched in sorted_schedules[:top_n]]
     
