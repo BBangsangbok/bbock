@@ -166,20 +166,33 @@ with tab2:
                                 
                             result_df = pd.DataFrame(schedule_data)
                             st.table(result_df)
+                            # 1. 한눈에 보기 쉬운 멤버-요일별 스케줄 표 (Grid 형식)
+                            grid_data = {}
+                            for member in st.session_state.members:
+                                row_data = []
+                                for j in range(7):
+                                    # 해당 멤버가 j번째 요일에 투입되는지 확인
+                                    is_working = any(m.name == member.name for m in schedule[j])
+                                    row_data.append("⭕" if is_working else "")
+                                grid_data[member.name] = row_data
                             
-                            # 2. 투입 횟수 검증 요약
-                            st.caption("✅ 멤버별 주간 투입 횟수 검증")
+                            # 빨간날(주말/공휴일) 인덱스 모음
+                            red_days = set([5, 6] + public_holidays)
                             
-                            verification_data = {"멤버명": [], "목표 근무 횟수": [], "실제 배정 횟수": [], "비고": []}
-                            for m in st.session_state.members:
-                                off_count = len(off_days_dict.get(m.name, []))
-                                target_count = 4 if off_count >= 3 else 5
-                                actual_count = sum(1 for team in schedule if m in team)
+                            # 열 이름 생성 (빨간날은 앞에 🔴 이모지 추가)
+                            col_names = [f"🔴 {DAYS[i]}" if i in red_days else f"{DAYS[i]}" for i in range(7)]
+                            
+                            grid_df = pd.DataFrame.from_dict(grid_data, orient='index', columns=col_names)
+                            
+                            # 데이터프레임 스타일링 (빨간날 열의 ⭕ 기호를 빨간색으로, 평일은 기본색으로)
+                            def highlight_red_days(col):
+                                if "🔴" in col.name:
+                                    return ['color: #ff4b4b; font-weight: bold' if v == '⭕' else '' for v in col]
+                                return ['font-weight: bold' if v == '⭕' else '' for v in col]
                                 
-                                verification_data["멤버명"].append(m.name)
-                                verification_data["목표 근무 횟수"].append(f"{target_count}회")
-                                verification_data["실제 배정 횟수"].append(f"{actual_count}회")
-                                verification_data["비고"].append("월차 적용 (휴일 3일 이상)" if target_count == 4 else "-")
-                                    
-                            count_df = pd.DataFrame(verification_data)
-                            st.dataframe(count_df, hide_index=True, use_container_width=True)
+                            styled_grid = grid_df.style.apply(highlight_red_days, axis=0)
+                            
+                            st.markdown("##### 📅 주간 투입 현황표")
+                            st.dataframe(styled_grid, use_container_width=True)
+                            
+                            st.write("") # 여백
